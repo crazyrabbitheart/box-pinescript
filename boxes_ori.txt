@@ -1,0 +1,814 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ARrowofTime
+
+mtaction(typestr,sym,price,lot,sl,tp,comm)=>
+    var _order="{\"order\":{\"action\":\""+typestr+"\","
+         + "\"exchange\":\"mt5\","
+         +"\"price\":\""+str.tostring(price)+"\","
+         +"\"close\":\""+str.tostring(price)+"\","
+         +"\"passphrase\":\"mt5\","
+         +"\"strategy_name\":"+comm+","
+         +"\"lot\":\""+str.tostring(lot)+"\","
+         +"\"sl\":\""+str.tostring(sl)+"\","
+         +"\"tp\":\""+str.tostring(tp)+"\","
+         +"\"symbol\":\""+sym+"\""
+         +"}}"
+//@version=5
+
+
+strategy("THE FREEMAN A4", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500) 
+ // type of entry order
+ordersType = input.string(defval = "Limit", title = "Order Type", options = ["Limit", "Market", "Market - Limit"])
+// subtract one tick from the entry price
+subtick = input.bool(false, title="delete a tick in the entry order")
+// add 1 tick to stop loss
+muladdtick = input.int(1, "count", inline = "addtick")
+addtick = input.bool(false, title="add 1 tick to stop loss",  inline = "addtick")
+// add 1 tick to take profit
+muladdtickp = input.int(1, "count",  inline = "addtickp")
+addticktp = input.bool(false, title="add 1 tick to take profit",  inline = "addtickp")
+maxnumbars = input.int(5, "maximum number of bars")
+allow_reentry = input.bool(true, "Allow Reentry")
+
+tickOffsetInput = input.float(1.0,step=0.10, title="Ticks Offset", minval=0   ,group = "Increse Tick For box") * syminfo.mintick
+tickOffsetInput2 = input.float(1.0,step=0.10, title="Ticks Offset 2", minval=0,group = "Increse Tick For entry") * syminfo.mintick
+tickOffsetsl     = input.float(1.0,step=0.10, title="Sl tick Offset", minval=0,group = "Increse Tick For entry") * syminfo.mintick
+
+var int contLong = 0
+var int contShort = 0
+sumando = strategy.position_size > 0 ? 1 : 0
+contLong := contLong + sumando
+sumandoShort = strategy.position_size < 0 ? 1 : 0
+contShort := contShort + sumandoShort
+
+if strategy.position_size == 0
+    contLong := 0
+    contShort := 0
+if contLong > maxnumbars
+    strategy.exit("exit", "long", limit=close)
+if contShort > maxnumbars
+    strategy.exit("exit", "short", limit=close)
+
+//backtest engine
+start = input.time(timestamp('2020-01-01'), title='Start calculations from',group='Backtest Period')
+end=input.time(timestamp('2045-03-01'), title='End calculations',group='Backtest Period')
+
+time_cond = time >= start and time<=end
+
+// time_cond
+
+//only trade select Gmt time 
+gmt=input.string("America/New_York",title="Gmt",options=["America/New_York","America/Los_Angeles","America/Chicago","America/Phoenix","America/Toronto"
+     ,"America/Vancouver","America/Argentina/Buenos_Aires","America/El_Salvador","America/Sao_Paulo","America/Bogota"
+     ,"Europe/Moscow" ,"Europe/Athens"	 ,"Europe/Berlin","Europe/London"	,"Europe/Madrid"	,"Europe/Paris"	,"Europe/Warsaw",
+     "Australia/Sydney","Australia/Brisbane","Australia/Adelaide","Australia/ACT"	,"Asia/Almaty"	
+     ,"Asia/Ashkhabad" ,"Asia/Tokyo"	 ,"Asia/Taipei"	 ,"Asia/Singapore"	 ,"Asia/Shanghai"	 ,"Asia/Seoul"	 ,"Asia/Tehran"	 ,"Asia/Dubai"	 ,"Asia/Kolkata"
+     ,"Asia/Hong_Kong" ,"Asia/Bangkok"	,"Pacific/Auckland","Pacific/Chatham","Pacific/Fakaofo"	,"Pacific/Honolulu" ],group="Select Time for Signal",inline="hm")
+
+select_gmt=gmt=="America/New_York"? "GMT-4:00":gmt=="America/Los_Angeles"? "GMT-7:00":gmt=="America/Chicago"? "GMT-5:00":gmt=="America/Phoenix"?"GMT-7:00":
+           gmt=="America/Toronto"?"GMT-4:00":gmt=="America/Vancouver"?"GMT-7:00": gmt=="America/Argentina/Buenos_Aires"?"GMT-3:00": gmt=="America/El_Salvador"	?"GMT-6:00":
+           gmt=="America/Sao_Paulo"?"GMT-3:00": gmt=="America/Bogota"?"GMT-5:00":gmt=="Europe/Moscow"?"GMT+3:00": gmt=="Europe/Athens"?"GMT+3:00":
+           gmt=="Europe/Berlin"	?"GMT+2:00": gmt=="Europe/London"?"GMT+1:00": gmt=="Europe/Madrid"?"GMT+2:00": gmt=="Europe/Paris"?"GMT+2:00":gmt=="Europe/Warsaw"?"GMT+2:00":
+           gmt=="Australia/Sydney"?"GMT+11:00":gmt=="Australia/Brisbane"?"GMT+10:00":gmt=="Australia/Adelaide"?"GMT+10:30":gmt=="Australia/ACT"?"GMT+9:30":
+           gmt=="Asia/Almaty"?"GMT+6:00":gmt=="Asia/Ashkhabad"?"GMT+5:00":gmt=="Asia/Tokyo"?"GMT+9:00":gmt=="Asia/Taipei"?"GMT+8:00":gmt=="Asia/Singapore"?"GMT+8:00":
+           gmt=="Asia/Shanghai"?"GMT+8:00":gmt=="Asia/Seoul"?"GMT+9:00":gmt=="Asia/Tehran"	?"GMT+3:30":gmt=="Asia/Dubai"	?"GMT+4:00":gmt=="Asia/Kolkata"?"GMT+5:30":
+           gmt=="Asia/Hong_Kong"?"GMT+8:00":gmt=="Asia/Bangkok"?"GMT+7:00":gmt=="Pacific/Auckland"?"GMT+13:00":gmt=="Pacific/Chatham"?"GMT+13:45":gmt=="Pacific/Fakaofo"	?"GMT+13:00":
+           gmt=="Pacific/Honolulu"?"GMT-10:00": na 
+
+
+enable_session=input.bool(defval=false,title="Backgroundcolor Trading Senssion",group="Trading Session")
+sessRange = input.session(title="Choose Trading Session ", defval="0930-1250",tooltip="Choose Trading Session For Trade (Best 10:30 to 13:30) ",group="Trading Session")
+t_r = time(timeframe.period, sessRange,select_gmt)
+bgcolor(not na(t_r) and enable_session ?color.new(color.green,90): na)
+time_range = not na(t_r)
+
+
+// time Conditions 2 
+
+enable_session2=input.bool(defval=false,title="Backgroundcolor Trading Senssion",group="Trading Session2")
+sessRange2 = input.session(title="Choose Trading Session ", defval="1300-2345",tooltip="Choose Trading Session For Trade (Best 10:30 to 13:30) ",group="Trading Session2")
+t_r2 = time(timeframe.period, sessRange2,select_gmt)
+bgcolor(not na(t_r2) and enable_session2 ?color.new(#4c91af, 90): na)
+time_range2 = not na(t_r2)
+
+
+// code start
+var string group_text ="Risk Reward Set"
+rr         = input.float(title="Money Reward", defval=1, minval=0.1 ,group = group_text)
+rr_risk    = input.float(title="Risk Distance)", defval=1, minval=0 ,group = group_text)
+i_risk     = input.float(title="Risk Amount $", defval=500, minval=1,group = group_text)
+prt_extend = input.float(defval=1,title="Extension percentage"    ,group = group_text, inline = 'box')
+tick_size = input.int(defval = 1, title="Tick Size", group = group_text, inline='box')
+
+drd=input(100.0,"Max Drawdown $",group = "Max Drawdown")
+
+balance         = (strategy.initial_capital + strategy.netprofit)
+bal_limited     = (balance > 0 ? balance : 0)
+bal_risked      = i_risk//(i_risk/100) * bal_limited
+var pos_size    = float(0)
+var diff        = float(0)
+
+//---------- INPUTS
+// => Alert Conditions
+var string t00_01           = "Alert Conditions"
+var string t00__01          = "Bearish Alert Active"
+var string t00__02          = ""
+var string t00__03          = "Bullish Alert Active"
+var string t00__04          = ""
+var string t00__05          = "Bearish All Create Alert Active"
+var string t00__06          = ""
+//var string t00__07          = "Bearish Overlap Create Alert Active"
+//var string t00__08          = ""
+var string t00__09          = "Bullish All Create Alert Active"
+var string t00__10          = ""
+//var string t00__11          = "Bullish Overlap Create Alert Active"
+//var string t00__12          = ""
+//var string t00__13          = "Trigger Line => "
+var string t00__14          = "Bearish"
+var string t00__15          = "Bullish"
+//var string t00__16          = "Alert Type"
+var string t00__17          = "Break Type"
+
+//
+
+
+
+alertbearishACTIVEbInput    = input.bool        (group = t00_01, title = t00__01, inline = "1", defval = true)
+alertbearishTXTInput        = input.string      (group = t00_01, title = t00__02, inline = "1", defval = "Red box touched")
+alertbullishACTIVEbInput    = input.bool        (group = t00_01, title = t00__03, inline = "2", defval = true)
+alertbullishTXTInput        = input.string      (group = t00_01, title = t00__04, inline = "2", defval = "Green box touched")
+alertbrcreateACTIVEbInput   = input.bool        (group = t00_01, title = t00__05, inline = "3", defval = false)
+alertbrcreateTXTInput       = input.string      (group = t00_01, title = t00__06, inline = "3", defval = "Red box created")
+//alertbrcreateolACTIVEbInput = input.bool        (group = t00_01, title = t00__07, inline = "4", defval = true)
+//alertbrcreateolTXTInput     = input.string      (group = t00_01, title = t00__08, inline = "4", defval = "Red overlap box created")
+alertblcreateACTIVEbInput   = input.bool        (group = t00_01, title = t00__09, inline = "5", defval = false)
+alertblcreateTXTInput       = input.string      (group = t00_01, title = t00__10, inline = "5", defval = "Green box created")
+//alertblcreateolACTIVEbInput = input.bool        (group = t00_01, title = t00__11, inline = "6", defval = true)
+//alertblcreateolTXTInput     = input.string      (group = t00_01, title = t00__12, inline = "6", defval = "Green overlap box created")
+//alerttriggerLINEbInput      = input.bool        (group = t00_01, title = t00__13, inline = "7", defval = false)
+//alertbearishCOLORInput      = input.color       (group = t00_01, title = t00__14, inline = "7", defval = color.red)
+//alertbullishCOLORInput      = input.color       (group = t00_01, title = t00__15, inline = "7", defval = color.green)
+alertTYPEInput              = "1st Break"
+alertbreakTYPEInput         = input.string      (group = t00_01, title = t00__17, inline = "",  defval = "Touch", options = ["Touch", "Close"])
+
+// => Settings
+var string t01_01           = "Settings"
+var string t01__01          = "Start Time"
+var string t01__02          = "Timezone"
+var string t01__03          = "Display Day Session"
+var string t01__04          = "Bullish"
+var string t01__05          = "Bearish"
+var string t01__06          = "Final Check"
+var string t01__07          = ""
+var string t01__08          = ""
+var string t01__09          = "Session Check"
+var string t01__10          = "Box Range"
+var string t01__11          = ""
+var string t01__12          = ""
+var string t01__13          = "Mirror Boxes"
+settingTIMEInput            = input.time        (group = t01_01, title = t01__01, inline = "",  defval = timestamp("04 Oct 2000 19:00"))
+settingZONEInput            = input.string      (group = t01_01, title = t01__02, inline = "",  defval = "GMT-7")
+//settingSESSIONbInput        = input.bool        (group = t01_01, title = t01__03, inline = "",  defval = false)
+settingBULLISHbInput        = input.bool        (group = t01_01, title = t01__04, inline = "",  defval = true)
+settingBEARISHbInput        = input.bool        (group = t01_01, title = t01__05, inline = "",  defval = true)
+settingFCHECKbInput         = input.bool        (group = t01_01, title = t01__06, inline = "1", defval = true)
+settingFNUMBERbInput        = input.int         (group = t01_01, title = t01__07, inline = "1", defval = 6, minval = 1)
+settingFTYPEbInput          = input.string      (group = t01_01, title = t01__08, inline = "1", defval = "One Bar", options = ["One Bar", "All Bar"])
+//settingsessionCHECKbInput   = input.bool        (group = t01_01, title = t01__09, inline = "",  defval = true)
+settingRANGEbInput          = false
+settingrangeLOCInput        = "Right"
+settingrangeMULTInput       = 100
+settingMIRbInput            = false
+
+// => Colors
+var string t02_01           = "Colors"
+var string t02__01          = "Bearish Boxes Color"
+var string t02__02          = "Bullish Boxes Color"
+var string t02__03          = "Session Color"
+var string t02__04          = "Mirror Bearish Boxes Color"
+var string t02__05          = "Mirror Bearish Boxes Border Color"
+var string t02__06          = "Mirror Bullish Boxes Color"
+var string t02__07          = "Mirror Bullish Boxes Border Color"
+colorbrBGInput              = input.color       (group = t02_01, title = t02__01, inline = "", defval = color.new(color.red, 85))
+colorblBGInput              = input.color       (group = t02_01, title = t02__02, inline = "", defval = color.new(color.green, 85))
+colorsessionBGInput         = input.color       (group = t02_01, title = t02__03, inline = "", defval = color.new(color.blue, 80))
+colorbrmirBGInput           = input.color       (group = t02_01, title = t02__04, inline = "", defval = color.new(color.red, 100))
+colorbrmirBORInput          = input.color       (group = t02_01, title = t02__05, inline = "", defval = color.new(color.white, 0))
+colorblmirBGInput           = input.color       (group = t02_01, title = t02__06, inline = "", defval = color.new(color.green, 100))
+colorblmirBORInput          = input.color       (group = t02_01, title = t02__07, inline = "", defval = color.new(color.white, 0))
+
+
+leftLen = input.int(title="Left", defval=10, minval=1, inline="1", group="Bars")
+rightLen = input.int(title="Right", defval=10, minval=1, inline="1", group="Bars")
+boxLengthB = input(40, title="Box Right Bars Length", group="Bars")
+boxPercent = input.float(defval=50,title="Box Percent Size",minval=1,maxval=100, group="Bars")
+
+ColorL = input(title="Top Box Color", defval=color.new(#025fff, 85), inline="2", group="Color")
+ColorL2 = input(title="Top Border Color", defval=(color.rgb(249, 100, 0, 100)), inline="2", group="Color")
+ColorH = input(title="Bottom Box Color", defval=color.new(#ff7b00, 89), inline="3", group="Color")
+ColorH2 = input(title="Bottom Border Color", defval=(color.rgb(6, 68, 130, 100)), inline="3", group="Color")
+
+
+styleOption = input.string("solid (─)", title="Line Style",
+     options=["solid (─)", "dotted (┈)", "dashed (╌)"])
+
+
+show_next_trade = input.bool(true,"Show Next Trade Info")
+
+lineStyle = styleOption == "dotted (┈)" ? line.style_dotted :
+     styleOption == "dashed (╌)" ? line.style_dashed :
+         line.style_solid
+
+ph = ta.pivothigh(leftLen, rightLen)
+pl = ta.pivotlow(leftLen, rightLen)
+
+
+//---------- CALCULATIONS
+// * * * * * *
+// * * * * * *
+// * * * * * *
+// * * * * * *
+// => Functions
+// * MA
+
+
+// ** Nonrepainting Security
+nonRepaintingSecurity(sym, tf, src, gaps) =>
+    request.security(sym, tf, src[barstate.isrealtime ? 1 : 0], gaps = gaps == "gaps_on" ? barmerge.gaps_on : barmerge.gaps_off)[barstate.isrealtime ? 0 : 1]
+
+// * * * * * *
+// * * * * * *
+// * * * * * *
+// * * * * * *
+// => Sessions and MA
+// * Sessions
+var bool is_friday   = false
+
+bar_in_session  = true
+
+if dayofweek(time, settingZONEInput) == dayofweek.friday
+    is_friday := true
+
+if is_friday and dayofweek(time, settingZONEInput) != dayofweek.friday//settingsessionCHECKbInput and 
+    bar_in_session := false
+    is_friday := false
+else if (dayofweek(time, settingZONEInput) == dayofweek.saturday or dayofweek(time, settingZONEInput) == dayofweek.sunday)//settingsessionCHECKbInput and 
+    bar_in_session := false
+
+bar_in_session := true
+
+//bgcolor(settingSESSIONbInput and bar_in_session and time >= settingTIMEInput ? colorsessionBGInput : na, title = "Session Color")
+
+// ** MA
+
+
+
+
+// * * * * * *
+// * * * * * *
+// * * * * * *
+// * * * * * *
+// => Bearish Boxes
+var box[]   brBox               = array.new<box>()
+var box[]   brMirBox            = array.new<box>()
+var int[]   brBoxAlertCond      = array.new<int>()
+var bool    brBoxDraw           = false
+var bool    brCheckCons         = false
+var bool    brCheck4thBar       = false
+var bool    brCheckFinal        = false
+var bool    brCheckConsLmt      = false
+var bool    brCheckSession      = false
+var float   brBoxTop            = na
+var float   brBoxBtm            = na
+var int     brBoxBtmIndex       = na
+var int     brBoxTopIndex       = na
+
+var int     _brBoxBtmIndex       = na
+var int     _brBoxTopIndex       = na
+
+
+brBoxAlert      = false
+brBoxOverlap    = false      
+chartTF         = timeframe.period + (timeframe.period != "D" and timeframe.period != "W" and timeframe.period != "W" ? " min." : "")
+
+var hh=float(na)
+var ll = float(na)
+
+type piv 
+    float base
+    float stoploss
+    bool forlong
+    bool active
+    bool touch
+
+var piv [] monitor_list = array.new<piv>(1, piv.new(na, na,na)) 
+var tp = 0.0
+var sl = 0.0
+var sl_buy = 0.0
+var tp_buy = 0.0
+var price_buy = 0.0
+var sl_sell = 0.0
+var tp_sell = 0.0
+var price_sell = 0.0
+var sl_pips = 0.0
+var tp_pips = 0.0
+var extend = 0.0
+var prt = 0.0 + math.max(0,prt_extend)/100.0
+var real_limit = 0.0
+var boxcount = 0
+var removedcount = 0
+var addedcount = 0
+var pivot_bar_pct = 0.0
+
+//sl_buy := na
+//tp_buy := na
+//price_buy := na
+//sl_sell := na
+//tp_sell := na
+//price_sell := na
+sl_pips := na
+tp_pips := na
+
+if time >= settingTIMEInput and settingBEARISHbInput and not na(ph)
+    
+    brBoxDraw       := true
+    toprange        = rightLen
+    pivot_bar_pct  := (high[rightLen]-low[rightLen])*boxPercent/100.0
+    brBoxTop        := high[rightLen]
+    brBoxTopIndex   := time[rightLen]
+    _brBoxTopIndex   := rightLen
+    brBoxBtm        := high[rightLen] - pivot_bar_pct
+    brBoxBtmIndex   := time[rightLen]
+    _brBoxBtmIndex   := rightLen
+        
+    if settingFCHECKbInput
+        sessioncheck = true
+        // Session Check of Final Check
+        // Highest of Final Check Input Bar(-5 - Input) is higher than top of box, box won't be created
+        if sessioncheck and high[rightLen + settingFNUMBERbInput] > brBoxTop
+            brBoxDraw := false
+    // If bar is out of session, box wont created created
+
+    // Drawing Box
+    if brBoxDraw
+//        if array.size(brBox) > 0
+//            for i = 0 to (array.size(brBox) - 1)
+//                top = box.get_top(array.get(brBox, i))
+//                btm = box.get_bottom(array.get(brBox, i))
+//                real_limit := top - (top-btm)/(1.0+prt)
+//                if not ((brBoxTop > top and brBoxBtm > top) or (brBoxTop < real_limit and brBoxBtm < real_limit))
+//                    brBoxOverlap := true
+//                    break
+        // convert percentage extension to tick                    
+        extend := (prt * 100) * syminfo.mintick
+        txt = settingRANGEbInput ? str.tostring(math.abs((extend + brBoxTop - brBoxBtm) * settingrangeMULTInput)) : ""
+        loc = settingrangeLOCInput == "Right" ? text.align_right : settingrangeLOCInput == "Left" ? text.align_left : text.align_center
+
+        //monitor_list.shift()
+        monitor_list.push(piv.new(brBoxBtm-extend,brBoxTop,false))
+        addedcount:=addedcount+1
+        
+        array.unshift(brBox, box.new(bar_index[rightLen], brBoxTop, bar_index+boxLengthB, (brBoxBtm-extend)-tickOffsetInput, bgcolor = colorbrBGInput, text = txt, text_size = size.normal, text_color = color.red, text_halign = loc, border_color = color.new(colorbrBGInput, 100)))  
+        array.unshift(brBoxAlertCond, 0)    
+
+        if settingMIRbInput
+            array.unshift(brMirBox, box.new(bar_index[rightLen], brBoxBtm-extend, bar_index+boxLengthB, brBoxBtm - extend - (brBoxTop - brBoxBtm),  bgcolor = colorbrmirBGInput, border_color = colorbrmirBORInput, border_style = line.style_dotted))
+        brBoxDraw   := false
+        brBoxAlert  := true
+// After Box is created
+if array.size(brBox) != 0
+    for i = (array.size(brBox) - 1) to 0
+//        box.set_right(array.get(brBox, i), bar_index) // Location of Right of Box
+//        if settingMIRbInput
+//            box.set_right(array.get(brMirBox, i), bar_index) // Location of Right of Box
+        // In Session
+        if bar_in_session == true
+            box_top     = box.get_top(array.get(brBox, i))
+            box_btm     = box.get_bottom(array.get(brBox, i))
+            crosso      = ((alertbreakTYPEInput == "Touch" ? high[1] : close[1]) < box_btm) and ((alertbreakTYPEInput == "Touch" ? high : close) >= box_btm) ? true : false
+
+            
+            // Bearish Alert
+            if alertbearishACTIVEbInput == true and (alertbreakTYPEInput == "Touch" ? true : barstate.isconfirmed)
+                if alertTYPEInput == "1st Break" ? array.get(brBoxAlertCond, i) == 0 : true
+                    if crosso //and (alertmaACTIVEbInput == "Yes" ? low < ma1st and box_btm < ma1st  : true)
+                        array.set(brBoxAlertCond, i, 1)
+                        alert("🔴 " + alertbearishTXTInput + " - " + chartTF, alert.freq_once_per_bar)
+
+            // Box is broken and 
+            if high > box_top
+                array.remove(brBox, i)
+                array.remove(brBoxAlertCond, i)
+                if settingMIRbInput
+                    array.remove(brMirBox, i)
+        // Out Session
+        if bar_in_session == false
+//            box.set_right(array.get(brBox, i), bar_index-1)
+            array.remove(brBox, i)
+            array.remove(brBoxAlertCond, i)
+            if settingMIRbInput
+//                box.set_right(array.get(brMirBox, i), bar_index-1)
+                array.remove(brMirBox, i)
+
+// * * * * * *
+// * * * * * *
+// * * * * * *
+// * * * * * *
+// => Bullish Boxes
+var box[]   blBox               = array.new<box>()
+var box[]   blMirBox            = array.new<box>()
+var int[]   blBoxAlertCond      = array.new<int>()
+var bool    blBoxDraw           = false
+var bool    blCheckCons         = false
+var bool    blCheck4thBar       = false
+var bool    blCheckFinal        = false
+var bool    blCheckConsLmt      = false
+var bool    blCheckSession      = false
+var float   blBoxTop            = na
+var int     blBoxTopIndex       = na
+var float   blBoxBtm            = na
+var int     blBoxBtmIndex       = na
+
+blBoxAlert      = false
+blBoxOverlap    = false
+
+if time >= settingTIMEInput and settingBULLISHbInput and not na(pl)
+    
+    blBoxDraw       := true
+    pivot_bar_pct  := (high[rightLen]-low[rightLen])*boxPercent/100.0
+    btmrange        = rightLen
+    blBoxTop        := low[rightLen] + pivot_bar_pct
+    blBoxTopIndex   := rightLen
+    blBoxBtm        := low[rightLen]
+    blBoxBtmIndex   := rightLen
+    
+    if settingFCHECKbInput
+        sessioncheck = true
+        // Lowest of Final Check Input Bar(-5 - Input) is lower than bottom of box, box won't be created
+        if sessioncheck and low[rightLen + settingFNUMBERbInput] < blBoxBtm
+            blBoxDraw := false
+    // If bar is out of session, box wont created created
+        
+
+        
+    // Drawing Box
+    if blBoxDraw
+//        if array.size(blBox) > 0
+//            for i = 0 to (array.size(blBox) - 1)
+//                top = box.get_top(array.get(blBox, i))
+//                btm = box.get_bottom(array.get(blBox, i))
+//                real_limit := btm + (top-btm)/(1.0+prt)
+//                if not ((blBoxTop > real_limit and blBoxBtm > real_limit) or (blBoxTop < btm and blBoxBtm < btm))
+//                    blBoxOverlap := true
+//                    break
+        
+        extend := (prt * 100) * syminfo.mintick
+        txt = settingRANGEbInput ? str.tostring(math.abs((extend + blBoxTop - blBoxBtm) * settingrangeMULTInput)) : ""
+        loc = settingrangeLOCInput == "Right" ? text.align_right : settingrangeLOCInput == "Left" ? text.align_left : text.align_center
+        
+        //monitor_list.shift()
+        monitor_list.push(piv.new(blBoxTop+extend, blBoxBtm,true))
+        addedcount:=addedcount+1
+
+        array.unshift(blBox, box.new(bar_index[rightLen],tickOffsetInput+blBoxTop+extend, bar_index+boxLengthB, blBoxBtm, bgcolor = colorblBGInput,  text = txt, text_size = size.normal, text_color = color.green, text_halign = loc, border_color = color.new(colorblBGInput, 100)))  
+        array.unshift(blBoxAlertCond, 0)    
+        if settingMIRbInput
+            array.unshift(blMirBox, box.new(bar_index[rightLen],blBoxTop + extend + (blBoxTop - blBoxBtm), bar_index+boxLengthB, (blBoxTop+extend),  bgcolor = colorblmirBGInput, border_color = colorblmirBORInput, border_style = line.style_dotted))
+        blBoxDraw   := false
+        blBoxAlert  := true
+// After Box is created
+if array.size(blBox) != 0
+    for i = (array.size(blBox) - 1) to 0
+//        box.set_right(array.get(blBox, i), bar_index) // Location of Right of Box
+//        if settingMIRbInput
+//            box.set_right(array.get(blMirBox, i), bar_index) // Location of Right of Box
+        // In Session
+        if bar_in_session == true
+            box_top     = box.get_top(array.get(blBox, i))
+            box_btm     = box.get_bottom(array.get(blBox, i))
+            crossu      = ((alertbreakTYPEInput == "Touch" ? low[1] : close[1]) > box_top) and ((alertbreakTYPEInput == "Touch" ? low : close) <= box_top) ? true : false
+
+            
+            // Bullish Alert
+            if alertbullishACTIVEbInput == true and (alertbreakTYPEInput == "Touch" ? true : barstate.isconfirmed)
+                if alertTYPEInput == "1st Break" ? array.get(blBoxAlertCond, i) == 0 : true
+                    if crossu //and (alertmaACTIVEbInput == "Yes" ? high > ma1st and box_top > ma1st  : true)
+                        array.set(blBoxAlertCond, i, 1)
+                        alert("🟢 " + alertbullishTXTInput + " - " + chartTF, alert.freq_once_per_bar)
+
+            // Box is broken and 
+            if low < box_btm
+                array.remove(blBox, i)
+                array.remove(blBoxAlertCond, i)
+                if settingMIRbInput
+                    array.remove(blMirBox, i)
+        // Out Session
+        if bar_in_session == false
+//            box.set_right(array.get(blBox, i),bar_index-1)
+            array.remove(blBox, i)
+            array.remove(blBoxAlertCond, i)
+            if settingMIRbInput
+//                box.set_right(array.get(blMirBox, i), bar_index-1)
+                array.remove(blMirBox, i)
+
+
+// * * * * * *
+// * * * * * *
+// * * * * * *
+// * * * * * *
+// => Alerts
+if brBoxAlert and alertbrcreateACTIVEbInput
+    alert(alertbrcreateTXTInput + " - " + chartTF, alert.freq_once_per_bar_close)
+if blBoxAlert and alertblcreateACTIVEbInput
+    alert(alertblcreateTXTInput + " - " + chartTF, alert.freq_once_per_bar_close)
+
+
+
+
+//strategy.cancel_all()
+last_long_index = -1
+last_long_index := -1
+last_short_index = -1
+last_short_index := -1
+mt5limit=0.0
+mt5action=""
+mt5tp=0.0
+mt5sl=0.0
+mt5=""
+mt5size=0.0
+if (strategy.position_size==0 and monitor_list.size()>0) 
+    find_long = false
+    find_short = false
+    price_long = 0
+    price_short = 1000000
+    log.info(str.tostring(monitor_list.size()))
+    for i=0 to (monitor_list.size()-1)
+        mt5limit:=0.0
+        mt5action:=""
+        mt5tp:=0.0
+        mt5sl:=0.0
+        mt5:=""
+        pivvalue = array.get(monitor_list,i)
+        if(na(pivvalue.base))
+            continue
+        box_size = (math.abs(pivvalue.base-pivvalue.stoploss))
+        if((pivvalue.forlong and low<pivvalue.stoploss) or (pivvalue.forlong==false and high>pivvalue.stoploss))
+            pivvalue.base:= na
+            array.set(monitor_list,i,pivvalue)
+            removedcount:=removedcount+1
+            continue
+        if(pivvalue.active)
+            if(pivvalue.forlong)
+                find_long := true
+                if (close>pivvalue.base )and (price_long<pivvalue.base) and not pivvalue.touch
+                   
+                    last_long_index := i
+                    //diff:= math.abs((pivvalue.base-pivvalue.stoploss)*rr_risk)
+                    diff:= math.abs((pivvalue.base-pivvalue.stoploss))
+                    pos_size:= (bal_risked / (rr_risk*diff))/syminfo.pointvalue
+                    pos_size := math.max(pos_size,1)
+                    mt5size:= bal_risked / ((rr_risk*diff)/syminfo.mintick*10)
+                    log.info("long pos_size:"+str.tostring(pos_size)+"mt5size"+str.tostring(mt5size))
+                    //strategy.entry("long",strategy.long,qty=pos_size)
+                    //strategy.exit("exit","long",limit=close+(close-pivvalue.stoploss)*rr,stop=pivvalue.stoploss)
+                    sl:=pivvalue.base-diff*rr_risk
+                    tp:=pivvalue.base+diff*rr
+                    tp_buy := tp
+                    sl_buy := sl
+                    price_buy := pivvalue.base
+                    sl_pips:=sl/syminfo.mintick
+                    tp_pips:=tp/syminfo.mintick
+        
+                    
+                    if tick_size != 0               // normal mode equal to zero
+                        // long entry mode selection
+                        if time_cond and (time_range or time_range2) and strategy.opentrades==0 and not((pivvalue.base - pivvalue.stoploss) + (1*syminfo.mintick) <= tick_size * syminfo.mintick)
+                            if ordersType == "Limit"
+                                mt5limit:=subtick ? pivvalue.base+tickOffsetInput2 - (1*syminfo.mintick) : pivvalue.base+tickOffsetInput2
+                                mt5action:="buylimit"
+                                //label.new(bar_index,high,"monitor1"+str.tostring( strategy.opentrades))
+                                mt5:=mtaction("buy",syminfo.ticker,close,mt5size,0.0,0.0,"long")
+                                strategy.entry("long",strategy.long,qty=pos_size ,limit=subtick ? pivvalue.base+tickOffsetInput2 - (10*syminfo.mintick) : pivvalue.base+tickOffsetInput2,alert_message=mt5)
+                            else
+                                mt5limit:=close
+                                mt5action:="buy"
+                                mt5:=mtaction("buy",syminfo.ticker,close,mt5size,0.0,0.0,"long")
+                                strategy.entry("long",strategy.long,qty=pos_size,alert_message=mt5)
+                                
+                    else if time_cond and (time_range or time_range2) and strategy.opentrades==0
+                        if ordersType == "Limit"
+                            //strategy.entry("long",strategy.long,qty=pos_size,limit=pivvalue.base+tickOffsetInput2)
+                            mt5action:="buylimit"
+                            mt5limit:=subtick ? pivvalue.base+tickOffsetInput2 - (1*syminfo.mintick) : pivvalue.base+tickOffsetInput2
+                            mt5:=mtaction("buy",syminfo.ticker,close,mt5size,0.0,0.0,"long")
+                            strategy.entry("long",strategy.long,qty=pos_size,limit=subtick ? pivvalue.base+tickOffsetInput2 - (10*syminfo.mintick) : pivvalue.base+tickOffsetInput2,alert_message=mt5)
+                        else
+                            mt5action:="buy"
+                            mt5limit:=close
+                            //alert(mtaction("buy",syminfo.ticker,close,pos_size,0.0,0.0))
+                            mt5:=mtaction("buy",syminfo.ticker,close,mt5size,0.0,0.0,"long")
+                            strategy.entry("long",strategy.long,qty=pos_size,alert_message=mt5)
+
+                    if ordersType =="Limit" or ordersType == "Market - Limit"            
+                        mt5tp:=addticktp ? tp + (muladdtickp*syminfo.mintick) : tp
+                        mt5sl:=addtick ? sl-tickOffsetsl - (muladdtick*syminfo.mintick) : sl-tickOffsetsl
+                        mt5:=mtaction("close",syminfo.ticker,close,mt5size,0.0,0.0,"long")
+                        strategy.exit("exit","long",limit= addticktp ? tp + (muladdtickp*syminfo.mintick) : tp,stop=addtick ? sl-tickOffsetsl - (muladdtick*syminfo.mintick) : sl-tickOffsetsl, comment=str.tostring(contLong),alert_message=mt5,alert_profit=mt5,alert_loss=mt5)        // normal mode
+                    else 
+                        mt5tp:=0.0
+                        mt5sl:=addtick ? sl-tickOffsetsl - (muladdtick*syminfo.mintick) : sl-tickOffsetsl
+                        mt5:=mtaction("close",syminfo.ticker,close,mt5size,0.0,0.0,"long")
+                        strategy.exit("exit","long",stop=addtick ? sl-tickOffsetsl - (muladdtick*syminfo.mintick) : sl-tickOffsetsl,alert_message=mt5,alert_profit=mt5,alert_loss=mt5)
+                    //if mt5action!=""
+                        //alert(mtaction(mt5action,syminfo.ticker,mt5limit,pos_size,mt5sl,mt5tp),alert.freq_once_per_bar)
+                    if contLong > maxnumbars
+                        mt5:=mtaction("close",syminfo.ticker,close,mt5size,0.0,0.0,"long")
+                        strategy.exit("exit", "long", limit=close,alert_message=mt5,alert_profit=mt5,alert_loss=mt5)
+
+                if low<pivvalue.base and not pivvalue.touch
+                    pivvalue.touch := true
+                    pivvalue.base:= na
+                    array.set(monitor_list,i,pivvalue)
+                    removedcount:=removedcount+1
+                    break
+
+            else
+                if (close<pivvalue.base) and (price_short>pivvalue.base) and not pivvalue.touch
+                   // label.new(bar_index,low,"monitor2"+str.tostring(i))
+                    last_short_index := i
+                    //diff:= math.abs((pivvalue.stoploss-pivvalue.base)*rr_risk)
+                    diff:= math.abs((pivvalue.stoploss-pivvalue.base))
+                    pos_size:= (bal_risked / (rr_risk*diff))/syminfo.pointvalue
+                    pos_size := math.max(pos_size,1)
+                    mt5size:=bal_risked / ((rr_risk*diff)/syminfo.mintick*10)
+                    log.info("short pos_size:"+str.tostring(pos_size)+"mt5size"+str.tostring(mt5size))
+                    //strategy.entry("short",strategy.long,qty=pos_size)
+                    //strategy.exit("exit","short",limit=close+(close-pivvalue.stoploss)*rr,stop=pivvalue.stoploss)
+                    sl:=pivvalue.base+diff*rr_risk
+                    tp:=pivvalue.base-diff*rr
+                    tp_sell := tp
+                    sl_sell := sl
+                    price_sell := pivvalue.base
+                    sl_pips:=sl/syminfo.mintick
+                    tp_pips:=tp/syminfo.mintick
+
+                    if tick_size != 0           // normal mode equal to zero
+                        // short entry mode selection
+                        if time_cond and (time_range or time_range2) and strategy.opentrades==0 and not(-(pivvalue.base - pivvalue.stoploss) + (1*syminfo.mintick) <= tick_size * syminfo.mintick)
+                            if ordersType == "Limit"
+                                mt5action:="selllimit"
+                                mt5limit:=subtick ? pivvalue.base+tickOffsetInput2 + (1*syminfo.mintick) : pivvalue.base+tickOffsetInput2
+                                mt5:=mtaction("sell",syminfo.ticker,close,mt5size,0.0,0.0,"short")
+                                strategy.entry("short",strategy.short,qty=pos_size,limit=subtick ? pivvalue.base+tickOffsetInput2 + (10*syminfo.mintick) : pivvalue.base+tickOffsetInput2,alert_message=mt5)
+                            else
+                                mt5action:="sell"
+                                mt5limit:=close
+                                mt5:=mtaction("sell",syminfo.ticker,close,mt5size,0.0,0.0,"short")
+                                strategy.entry("short",strategy.short,qty=pos_size,alert_message=mt5)
+                    else if time_cond and (time_range or time_range2) and strategy.opentrades==0
+                        if ordersType == "Limit"
+                            mt5action:="selllimit"
+                            mt5limit:=subtick ? pivvalue.base+tickOffsetInput2 + (1*syminfo.mintick) : pivvalue.base+tickOffsetInput2
+                            //strategy.entry("short",strategy.short,qty=pos_size,limit=pivvalue.base+tickOffsetInput2)
+                            mt5:=mtaction("sell",syminfo.ticker,close,mt5size,0.0,0.0,"short")
+                            strategy.entry("short",strategy.short,qty=pos_size,limit=subtick ? pivvalue.base+tickOffsetInput2 + (10*syminfo.mintick) : pivvalue.base+tickOffsetInput2,alert_message=mt5)
+                        else
+                            mt5action:="sell"
+                            mt5limit:=close
+                            mt5:=mtaction("sell",syminfo.ticker,close,mt5size,0.0,0.0,"short")
+                            strategy.entry("short",strategy.short,qty=pos_size,alert_message=mt5)
+
+                    if ordersType =="Limit" or ordersType == "Market - Limit"  
+                        mt5tp:=addticktp ? tp - (muladdtickp*syminfo.mintick) : tp
+                        mt5sl:=addtick ? sl-tickOffsetsl + (muladdtick*syminfo.mintick) : sl-tickOffsetsl         
+                        mt5:=mtaction("close",syminfo.ticker,close,mt5size,0.0,0.0,"short")
+                        strategy.exit("exit","short",limit=addticktp ? tp - (muladdtickp*syminfo.mintick) : tp,stop=addtick ? sl-tickOffsetsl + (muladdtick*syminfo.mintick) : sl-tickOffsetsl,alert_message=mt5,alert_profit=mt5,alert_loss=mt5)       // normal mode
+                    else
+                        mt5tp:=tp
+                        mt5sl:=addtick ? sl-tickOffsetsl + (muladdtick*syminfo.mintick) : sl-tickOffsetsl
+                        mt5:=mtaction("close",syminfo.ticker,close,mt5size,0.0,0.0,"short")
+                        strategy.exit("exit","short",stop=addtick ? sl-tickOffsetsl + (muladdtick*syminfo.mintick) : sl-tickOffsetsl,alert_message=mt5,alert_profit=mt5,alert_loss=mt5)
+
+                if(high>=pivvalue.base and not pivvalue.touch)
+                    pivvalue.touch := true
+                    pivvalue.base:= na
+                    array.set(monitor_list,i,pivvalue)
+                    removedcount:=removedcount+1
+                    break
+        else
+            if(pivvalue.forlong)
+                //if(low>pivvalue.base+box_size)
+                if(high>pivvalue.base+box_size)
+                    pivvalue.active:= true
+            else
+                //if(high<pivvalue.base-box_size)
+                if(low<pivvalue.base-box_size)
+                    pivvalue.active:= true
+            array.set(monitor_list,i,pivvalue)
+boxcount:=0
+ 
+if monitor_list.size()>0
+    for i=0 to (monitor_list.size()-1)
+        pivvalue = array.get(monitor_list,i)
+        if(na(pivvalue.base))
+            continue
+        boxcount:=boxcount+1
+    
+if strategy.position_size>0 and not allow_reentry and last_long_index[1]>=0 and last_long_index<0 and last_long_index[1]<monitor_list.size()
+    pivvalue = array.get(monitor_list,last_long_index[1])
+    pivvalue.base := na
+    array.set(monitor_list,last_long_index[1],pivvalue)
+
+if strategy.position_size<0 and not allow_reentry and last_short_index[1]>=0 and last_short_index<0 and last_short_index[1]<monitor_list.size()
+    pivvalue = array.get(monitor_list,last_short_index[1])
+    pivvalue.base := na
+    array.set(monitor_list,last_short_index[1],pivvalue)
+
+plot(strategy.position_size>0?sl-tickOffsetsl:na,"sl",color=color.red,style=plot.style_linebr)
+plot(strategy.position_size<0?sl+tickOffsetsl:na,"sl",color=color.red,style=plot.style_linebr)
+
+plot(strategy.position_size!=0?tp:na,"tp",color=color.green,style=plot.style_linebr)
+
+if monitor_list.size()>0
+    for i=(monitor_list.size()-1) to 0
+        pivvalue = array.get(monitor_list,i)
+        if na(pivvalue.base)
+            array.remove(monitor_list,i)
+
+
+box_set(obj,x1,y1,x2,y2) =>
+    box.set_left(obj,x1)
+    box.set_right(obj,x2)
+    box.set_bottom(obj,y1)
+    box.set_top(obj,y2)
+
+line_set(obj,x1,x2,y) =>
+    line.set_xy1(obj,x1,y)
+    line.set_xy2(obj,x2,y)
+
+
+draw(_price, _tp, _sl, 
+ _tp_box, _sl_box, _price_line, _tp_line, _sl_line, _price_label, _tp_label, _sl_label) =>
+    if na(_price) or na(_tp) or na(_sl) or _price<=0 or _tp<=0 or _sl<=0
+        box_set(_tp_box,0,0,0,0)
+        box_set(_sl_box,0,0,0,0)
+        line_set(_tp_line,0,0,0)
+        line_set(_sl_line,0,0,0)
+        line_set(_price_line,0,0,0)
+        label.set_xy(_tp_label,0,0)
+        label.set_xy(_sl_label,0,0)
+        label.set_xy(_price_label,0,0)
+    else
+        float dist_tp=0.0, dist_sl=0.0 ,dist_tp_pips=0.0, dist_sl_pips=0.0, pct_tp=0.0, pct_sl=0.0, y1=0.0, y2=0.0
+        int x1=0, x2=0
+        string text_price="", text_tp="", text_sl=""
+
+        dist_tp := math.abs(_tp-_price)
+        dist_sl := math.abs(_sl-_price)
+        dist_tp_pips := math.abs(_tp-_price)/syminfo.mintick
+        dist_sl_pips := math.abs(_sl-_price)/syminfo.mintick
+        pct_tp := 100*dist_tp/_price
+        pct_sl := 100*dist_sl/_price
+        text_price := str.tostring(_price)
+        text_tp := str.tostring(_tp) + " - " + str.tostring(dist_tp_pips,"#") + " - " + str.tostring(pct_tp, "#0.00") + "%"
+        text_sl := str.tostring(_sl) + " - " + str.tostring(dist_sl_pips,"#") + " - " + str.tostring(pct_sl, "#0.00") + "%"
+
+
+        box_set(_tp_box,bar_index-3,_price,bar_index+30,_tp)
+        box_set(_sl_box,bar_index-3,_price,bar_index+30,_sl)
+        line_set(_tp_line,bar_index-3,bar_index+30,_tp)
+        line_set(_sl_line,bar_index-3,bar_index+30,_sl)
+        line_set(_price_line,bar_index-3,bar_index+30,_price)
+        label.set_xy(_tp_label,bar_index,_tp)
+        label.set_xy(_sl_label,bar_index,_sl)
+        label.set_xy(_price_label,bar_index,_price)
+        label.set_text(_tp_label,text_tp)
+        label.set_text(_sl_label,text_sl)
+        label.set_text(_price_label,text_price)
+
+var buy_tp_box = box.new(na,na,na,na,border_color=color.lime,xloc=xloc.bar_index,bgcolor=color.new(color.lime,50))
+var buy_sl_box = box.new(na,na,na,na,border_color=color.red,xloc=xloc.bar_index,bgcolor=color.new(color.red,50))
+var buy_price_line = line.new(na,na,na,na,xloc.bar_index,extend.none,color.navy)
+var buy_tp_line = line.new(na,na,na,na,xloc.bar_index,extend.none,color.green)
+var buy_sl_line = line.new(na,na,na,na,xloc.bar_index,extend.none,color.maroon)
+var buy_price_label = label.new(na,na,"buy",xloc=xloc.bar_index,style=label.style_label_left,textcolor=color.black,textalign=text.align_left)
+var buy_tp_label = label.new(na,na,"buy",xloc=xloc.bar_index,style=label.style_label_lower_left,textcolor=color.black,textalign=text.align_left)
+var buy_sl_label = label.new(na,na,"buy",xloc=xloc.bar_index,style=label.style_label_upper_left,textcolor=color.black,textalign=text.align_left)
+
+var sell_tp_box = box.new(na,na,na,na,border_color=color.lime,xloc=xloc.bar_index,bgcolor=color.new(color.lime,50))
+var sell_sl_box = box.new(na,na,na,na,border_color=color.red,xloc=xloc.bar_index,bgcolor=color.new(color.red,50))
+var sell_price_line = line.new(na,na,na,na,xloc.bar_index,extend.none,color.navy)
+var sell_tp_line = line.new(na,na,na,na,xloc.bar_index,extend.none,color.green)
+var sell_sl_line = line.new(na,na,na,na,xloc.bar_index,extend.none,color.maroon)
+var sell_price_label = label.new(na,na,"sell",xloc=xloc.bar_index,style=label.style_label_left,textcolor=color.black,textalign=text.align_left)
+var sell_tp_label = label.new(na,na,"sell",xloc=xloc.bar_index,style=label.style_label_upper_left,textcolor=color.black,textalign=text.align_left)
+var sell_sl_label = label.new(na,na,"sell",xloc=xloc.bar_index,style=label.style_label_lower_left,textcolor=color.black,textalign=text.align_left)
+
+if bar_index>=(last_bar_index-3) and bar_in_session and strategy.position_size==0
+    draw(price_buy,tp_buy,sl_buy, buy_tp_box,buy_sl_box,buy_price_line,buy_tp_line,buy_sl_line,buy_price_label,buy_tp_label,buy_sl_label)
+    draw(price_sell,tp_sell,sl_sell, sell_tp_box,sell_sl_box,sell_price_line,sell_tp_line,sell_sl_line,sell_price_label,sell_tp_label,sell_sl_label)
+
+
+
+
+
